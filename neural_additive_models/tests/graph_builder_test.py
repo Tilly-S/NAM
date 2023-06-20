@@ -18,7 +18,7 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 from neural_additive_models import data_utils
 from neural_additive_models import graph_builder
 

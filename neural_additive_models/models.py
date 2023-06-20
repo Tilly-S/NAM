@@ -99,7 +99,7 @@ class FeatureNN(tf.keras.layers.Layer):
       `ActivationLayer` containing `num_units` neurons with specified
       `activation`. If `shallow` is False, then it additionally contains 2
       tf.keras.layers.Dense ReLU layers with 64, 32 hidden units respectively.
-    linear: Fully connected layer.
+    linear: Fully connected layer.s
   """
 
   def __init__(self,

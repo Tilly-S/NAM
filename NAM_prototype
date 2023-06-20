@@ -1,0 +1,53 @@
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+
+# Loading survivalnet2 package 
+import survivalnet2
+from survivalnet2.data.labels import stack_labels, unstack_labels
+from survivalnet2.data.datasets import dataset
+from survivalnet2.losses import efron
+from survivalnet2.metrics.concordance import HarrellsC
+from survivalnet2.visualization import km_plot
+
+np.random.seed(51)
+tf.random.set_seed(51)
+
+# Loading neural_additive_models module
+from neural_additive_models import graph_builder
+
+# Loading data
+features, names, labels, description = dataset("tcga_glioma")
+# data = pd.read_csv("/Users/Huey.ts/Desktop/Survival_Analysis_Research/tcga_glioma.csv")
+# train = data.loc[13:20, :]
+# First 8 features are clinical variables
+names = names[:8]
+pfi = labels["pfi"] # y 
+features = features[:, :8] # x
+(N, D) = features.shape
+
+# Generate train/test split
+index = np.argsort(np.random.rand(N))
+train = np.zeros(N, np.bool_)
+train[index[0 : int(0.8 * N)].astype(np.int32)] = True
+test = ~train
+
+# Create tf Dataset for Keras training
+# dataset = tf.data.Dataset.from_tensor_slices((features[train, :], pfi[train, :]))
+
+graph_tensors, eval_metric_scores = graph_builder.build_graph(
+    x_train=features[train, :],
+    y_train=pfi[train, :],
+    x_test=features[test, :],
+    y_test=pfi[test, :],
+    activation='exu',
+    learning_rate=1e-3,
+    batch_size=64,
+    shallow=True,
+    regression=True,
+    output_regularization=0.1,
+    dropout=0.1,
+    decay_rate=0.999,
+    name_scope='model',
+    l2_regularization=0.1)
+

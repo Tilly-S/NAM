@@ -20,16 +20,20 @@ from typing import Union, List, Optional, Tuple, Callable, Dict
 import warnings
 import numpy as np
 from sklearn import metrics as sk_metrics
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 
 from neural_additive_models import models
 
+# Import packages from survivalnet2
+from survivalnet2.losses import efron
+from survivalnet2.metrics.concordance import HarrellsC
+
 # To suppress warnings in the sigmoid function
 warnings.filterwarnings('ignore')
-TfInput = models.TfInput
-LossFunction = Callable[[tf.keras.Model, TfInput, TfInput], tf.Tensor]
-GraphOpsAndTensors = Dict[str, Union[tf.Tensor, tf.Operation, tf.keras.Model]]
-EvaluationMetric = Callable[[tf.Session], float]
+# TfInput = models.TfInput
+# LossFunction = Callable[[tf.keras.Model, TfInput, TfInput], tf.Tensor]
+# GraphOpsAndTensors = Dict[str, Union[tf.Tensor, tf.Operation, tf.keras.Model]]
+# EvaluationMetric = Callable[[tf.Session], float]
 
 
 def cross_entropy_loss(model, inputs,
@@ -239,9 +243,9 @@ def create_balanced_dataset(x_train, y_train,
 
   pos, neg = partition_dataset(x_train, y_train)
   pos_dataset = tf.data.Dataset.from_tensor_slices(pos).apply(
-      tf.data.experimental.shuffle_and_repeat(buffer_size=len(pos[0])))
+      tf.data.Dataset.shuffle(buffer_size=len(pos[0], reshuffle_each_iteration=True)))
   neg_dataset = tf.data.Dataset.from_tensor_slices(neg).apply(
-      tf.data.experimental.shuffle_and_repeat(buffer_size=len(neg[0])))
+      tf.data.Dataset.shuffle(buffer_size=len(neg[0], reshuffle_each_iteration=True)))
   dataset = tf.data.experimental.sample_from_datasets(
       [pos_dataset, neg_dataset])
   ds_tensors = dataset.batch(batch_size)
@@ -264,8 +268,8 @@ def create_iterators(
       tf.data.Dataset.from_tensor_slices(data).batch(batch_size)
       for data in datasets
   ]
-  input_iterator = tf.data.Iterator.from_structure(tf_datasets[0].output_types,
-                                                   tf_datasets[0].output_shapes)
+  input_iterator = tf.data.Iterator.from_structure(tf_datasets[0].element_spec[0].dtype,
+                                                   tf_datasets[0].element_spec[0].shape)
   init_ops = [input_iterator.make_initializer(data) for data in tf_datasets]
   x_batch = input_iterator.get_next()
   return x_batch, init_ops
@@ -323,12 +327,13 @@ def build_graph(
 ):
   """Constructs the computation graph with specified hyperparameters."""
   if regression:
-    ds_tensors = tf.data.Dataset.from_tensor_slices((x_train, y_train)).apply(
-        tf.data.experimental.shuffle_and_repeat(buffer_size=len(x_train[0])))
+    ds_tensors = tf.data.Dataset.from_tensor_slices((x_train, y_train)).shuffle(
+      buffer_size=len(x_train[0]), reshuffle_each_iteration=True)
     ds_tensors = ds_tensors.batch(batch_size)
   else:
     # Create a balanced dataset to handle class imbalance
     ds_tensors = create_balanced_dataset(x_train, y_train, batch_size)
+  
   x_batch, (train_init_op, test_init_op) = create_iterators((x_train, x_test),
                                                             batch_size)
 
@@ -355,7 +360,8 @@ def build_graph(
   tf.logging.info(nn_model.summary())
   train_vars = nn_model.trainable_variables
   if regression:
-    loss_fn, y_pred = penalized_mse_loss, predictions
+    # loss_fn, y_pred = penalized_mse_loss, predictions
+    loss_fn, y_pred = efron, predictions
   else:
     # Apply sigmoid transformation for binary classification
     loss_fn, y_pred = penalized_cross_entropy_loss, tf.nn.sigmoid(predictions)
@@ -365,8 +371,8 @@ def build_graph(
       l2_regularization=l2_regularization,
       use_dnn=use_dnn)
 
-  iterator = ds_tensors.make_initializable_iterator()
-  x1, y1 = iterator.get_next()
+  iterator = iter(ds_tensors)
+  x1, y1 = next(iterator)
   loss_tensor, grads = grad(nn_model, x1, y1, loss_fn, train_vars)
   update_step = optimizer.apply_gradients(
       zip(grads, train_vars), global_step=global_step)
@@ -380,7 +386,8 @@ def build_graph(
       var_list=running_mean_vars)
 
   # Use RMSE for regression and ROC AUC for classification.
-  evaluation_metric = rmse_loss if regression else roc_auc_score
+  evaluation_metric = HarrellsC() if regression else roc_auc_score
+  # evaluation_metric = rmse_loss if regression else roc_auc_score
   train_metric = functools.partial(
       evaluation_metric,
       y_true=y_train,
